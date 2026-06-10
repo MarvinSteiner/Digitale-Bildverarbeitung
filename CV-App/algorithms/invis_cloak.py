@@ -11,6 +11,8 @@ class InvisCloak (Algorithm):
     """ init function """
     def __init__(self):
         self.image_stack = list()
+        self.background = None
+        self.capture_background = False
 
     """ Processes the input image"""
     def process(self, img):
@@ -43,6 +45,7 @@ class InvisCloak (Algorithm):
     def mouse_callback(self, event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONUP:
             print("A Mouse click happend! at position", x, y)
+            self.capture_background = True
 
     def _plotNoise(self, img, name:str):
         height, width = np.array(img.shape[:2])
@@ -70,6 +73,19 @@ class InvisCloak (Algorithm):
         if len(self.image_stack) > max_image_stack_length:
             self.image_stack = self.image_stack[-max_image_stack_length:]
 
+        # Mittel über die letzten N Frames berechnen
+        if len(self.image_stack) > 1:
+            stack = np.stack(self.image_stack, axis=0)
+
+            # Überläufe durch 32-Bit Int vermeiden
+            sum_img = np.sum(stack.astype(np.uint32), axis=0)
+
+            N = min(len(self.image_stack), max_image_stack_length)
+            mean_int = sum_img // N
+
+            # Zurückkonvertieren von 32-Bit Int
+            img = mean_int.astype(self.image_stack[0].dtype)
+
         return img
 
     def _212_HistogrammSpreizung(self, img):
@@ -79,44 +95,156 @@ class InvisCloak (Algorithm):
             - Histogrammspreizung berechnen
             - Transformation BGR
         """
+        #von BGR in HSV
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        h, s, v = cv2.split(hsv)
 
-        return img
+        #Histogrammspreizung nur von Value (Helligkeit)
+        v = cv2.normalize(
+            v,
+            None,
+            alpha=0,
+            beta=255,
+            norm_type=cv2.NORM_MINMAX
+        )
+
+        #Zusammensetzung zu HSV nach Histogrammspreizung
+        hsv = cv2.merge((h, s, v))
+
+        #von HSV in BGR (weiterhin mit dem Kamera-Bild arbeiten)
+        return cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
 
     def _221_RGB(self, img):
         """
             Hier steht Ihr Code zu Aufgabe 2.2.1 (RGB)
             - Histogrammberechnung und Analyse
         """
-        pass
+        #BGR
+        b_hist = cv2.calcHist([img], [0], None, [256], [0, 256]) #blau Kanal 0
+        g_hist = cv2.calcHist([img], [1], None, [256], [0, 256]) #grün Kanal 1
+        r_hist = cv2.calcHist([img], [2], None, [256], [0, 256]) #rot Kanal 2
 
+        return r_hist, g_hist, b_hist
 
     def _222_HSV(self, img):
         """
             Hier steht Ihr Code zu Aufgabe 2.2.2 (HSV)
             - Histogrammberechnung und Analyse im HSV-Raum
         """
-        pass
+        #von BGR in HSV
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
+        #HSV
+        h_hist = cv2.calcHist([hsv], [0], None, [180], [0, 180]) #Hue (Farbton) Kanal 0
 
-    def _23_SegmentUndBildmodifizierung (self, img):
+        return h_hist
+
+    def _23_SegmentUndBildmodifizierung(self, img):
         """
             Hier steht Ihr Code zu Aufgabe 2.3.1 (StatischesSchwellwertverfahren)
             - Binärmaske erstellen
         """
+        #von BGR in HSV
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
+        #Rot Range 1
+        lower_red1 = np.array([0, 120, 70])
+        upper_red1 = np.array([10, 255, 255])
+
+        #Rot Range 2
+        lower_red2 = np.array([170, 120, 70])
+        upper_red2 = np.array([180, 255, 255])
+
+        #Binärmaske erstellen
+        mask1 = cv2.inRange(hsv, lower_red1, upper_red1)
+        mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
+        mask = mask1 + mask2
 
         """
             Hier steht Ihr Code zu Aufgabe 2.3.2 (Binärmaske)
             - Binärmaske optimieren mit Opening/Closing
             - Wahl größte zusammenhängende Region
         """
+        #5x5 Matrix Kernel (nur 1)
+        kernel = np.ones((5, 5), np.uint8)
 
+        #Opening (Erosion + Dilatation)
+        mask = cv2.morphologyEx(
+            mask,
+            cv2.MORPH_OPEN,
+            kernel,
+            iterations=2
+        )
+
+        #Closing (Dilatation + Erosion)
+        mask = cv2.morphologyEx(
+            mask,
+            cv2.MORPH_CLOSE,
+            kernel,
+            iterations=2
+        )
+
+        #Außenlinie (Kontur) finden
+        contours, _ = cv2.findContours(
+            mask,
+            cv2.RETR_EXTERNAL, #nur äußere Konturen, keine inneren Konturen
+            cv2.CHAIN_APPROX_SIMPLE
+        )
+
+        #Leere Maske erstellen für Speicherung der größten Region
+        largest_mask = np.zeros_like(mask)
+
+        if len(contours) > 0: #Bugfix, falls kein Umhang sichtbar ist
+            #Fläche jeder Kontur berechnen
+            largest_contour = max(contours, key=cv2.contourArea)
+
+            #größte Kontur in der leeren Bitmaske einfärben
+            cv2.drawContours(
+                largest_mask,
+                [largest_contour],
+                -1,
+                255,
+                thickness=cv2.FILLED #Umhang ist ganze Fläche, nicht nur Außenlinie
+            )
+
+            #Annahme: Umhang ist größte rote Kontur im Bild (größtes Objekt flächenmäßig)
+            mask = largest_mask
 
         """
             Hier steht Ihr Code zu Aufgabe 2.3.1 (Bildmodifizerung)
             - Hintergrund mit Mausklick definieren
             - Ersetzen des Hintergrundes
         """
+        #Hintergrund aufnehmen
+        if self.capture_background:
+            self.background = img.copy() #copy sonst jedes neue Kamerabild = neuer Hintergrund
+            self.capture_background = False
 
+        #Falls noch kein Hintergrund aufgenommen wurde
+        if self.background is None:
+            return img
 
-        return img
+        #Maske invertieren
+        mask_inv = cv2.bitwise_not(mask)
+
+        #Vordergrund extrahieren (alles außer Umhang)
+        foreground = cv2.bitwise_and(
+            img,
+            img,
+            mask=mask_inv
+        )
+
+        #Hintergrund extrahieren aus Momentaufnahme beim Mausklick (Bereich des Umhangs)
+        background_part = cv2.bitwise_and(
+            self.background,
+            self.background,
+            mask=mask
+        )
+
+        #Vorder- und  Hintergrund zusammenfügen
+        result = cv2.add(
+            foreground,
+            background_part
+        )
+
+        return result
