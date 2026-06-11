@@ -6,105 +6,89 @@ from matplotlib import pyplot as plt
 from . import Algorithm
 
 
-class InvisCloak (Algorithm):
+class InvisCloak(Algorithm):
 
-    """ init function """
     def __init__(self):
         self.image_stack = list()
         self.background = None
         self.capture_background = False
 
-    """ Processes the input image"""
+        # FIX: Histogramm nur 1x anzeigen
+        self.hist_done = False
+
     def process(self, img):
 
         """ 2.1 Vorverarbeitung """
-        """ 2.1.1 Rauschreduktion """
-        plotNoise = False   # Schaltet die Rauschvisualisierung ein
+
+        plotNoise = False
         if plotNoise:
             self._plotNoise(img, "Rauschen vor Korrektur")
+
         img = self._211_Rauschreduktion(img)
+
         if plotNoise:
             self._plotNoise(img, "Rauschen nach Korrektur")
+
         """ 2.1.2 HistogrammSpreizung """
         img = self._212_HistogrammSpreizung(img)
 
+        """ 2.2 Farbanalyse (NUR EINMAL AUSFÜHREN!) """
+        if not self.hist_done:
+            self._221_RGB(img)
+            self._222_HSV(img)
+            self.hist_done = True
 
-        """ 2.2 Farbanalyse """
-        """ 2.2.1 RGB """
-        self._221_RGB(img)
-        """ 2.2.2 HSV """
-        self._222_HSV(img)
-
-
-        """ 2.3 Segmentierung und Bildmdifikation """
+        """ 2.3 """
         img = self._23_SegmentUndBildmodifizierung(img)
 
         return img
 
-    """ Reacts on mouse callbacks """
     def mouse_callback(self, event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONUP:
             print("A Mouse click happend! at position", x, y)
             self.capture_background = True
 
-    def _plotNoise(self, img, name:str):
+    def _plotNoise(self, img, name: str):
         height, width = np.array(img.shape[:2])
         centY = (height / 2).astype(int)
         centX = (width / 2).astype(int)
 
         cutOut = 5
         tmpImg = deepcopy(img)
-        tmpImg = tmpImg[centY - cutOut:centY + cutOut, centX - cutOut:centX + cutOut, :]
+        tmpImg = tmpImg[centY - cutOut:centY + cutOut,
+                        centX - cutOut:centX + cutOut, :]
 
         outSize = 500
-        tmpImg = cv2.resize(tmpImg, (outSize, outSize), interpolation=cv2.INTER_NEAREST)
+        tmpImg = cv2.resize(tmpImg, (outSize, outSize),
+                            interpolation=cv2.INTER_NEAREST)
 
         cv2.imshow(name, tmpImg)
         cv2.waitKey(1)
 
     def _211_Rauschreduktion(self, img):
-        """
-            Hier steht Ihr Code zu Aufgabe 2.1.1 (Rauschunterdrückung)
-            - Implementierung Mittelwertbildung über N Frames
-        """
 
-        N = 1  # Default laut Aufgabenstellung 2.1.1
-
-        # Füge Bilder zum Image Stack hinzu, sodass maximal max_image_stack_length Bilder dort gespeichert sind
+        N = 3
         max_image_stack_length = N + 1
+
         self.image_stack.append(img)
         if len(self.image_stack) > max_image_stack_length:
             self.image_stack = self.image_stack[-max_image_stack_length:]
 
-        # Mittelwert über alle Bilder im Stack berechnen
         stack = np.stack(self.image_stack, axis=0)
 
-        # Überläufe durch 32-Bit Int vermeiden
         sum_img = np.sum(stack.astype(np.uint32), axis=0)
 
-        # Anzahl der aktuell gespeicherten Bilder
         num_images = len(self.image_stack)
 
-        # Mittelwert
         mean_img = sum_img // num_images
 
-        # Zurück in 8-Bit konvertieren
-        img = mean_img.astype(np.uint8)
-
-        return img
+        return mean_img.astype(np.uint8)
 
     def _212_HistogrammSpreizung(self, img):
-        """
-            Hier steht Ihr Code zu Aufgabe 2.1.2 (Histogrammspreizung)
-            - Transformation HSV
-            - Histogrammspreizung berechnen
-            - Transformation BGR
-        """
-        #von BGR in HSV
+
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
         h, s, v = cv2.split(hsv)
 
-        #Histogrammspreizung nur von Value (Helligkeit)
         v = cv2.normalize(
             v,
             None,
@@ -113,36 +97,61 @@ class InvisCloak (Algorithm):
             norm_type=cv2.NORM_MINMAX
         )
 
-        #Zusammensetzung zu HSV nach Histogrammspreizung
         hsv = cv2.merge((h, s, v))
 
-        #von HSV in BGR (weiterhin mit dem Kamera-Bild arbeiten)
         return cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
 
     def _221_RGB(self, img):
-        """
-            Hier steht Ihr Code zu Aufgabe 2.2.1 (RGB)
-            - Histogrammberechnung und Analyse
-        """
-        #BGR
-        b_hist = cv2.calcHist([img], [0], None, [256], [0, 256]) #blau Kanal 0
-        g_hist = cv2.calcHist([img], [1], None, [256], [0, 256]) #grün Kanal 1
-        r_hist = cv2.calcHist([img], [2], None, [256], [0, 256]) #rot Kanal 2
+
+        b_hist = cv2.calcHist([img], [0], None, [256], [0, 256])
+        g_hist = cv2.calcHist([img], [1], None, [256], [0, 256])
+        r_hist = cv2.calcHist([img], [2], None, [256], [0, 256])
+
+        plt.figure("RGB Histogramm", figsize=(8, 4))
+        plt.clf()
+
+        plt.plot(b_hist, color="b", label="Blue")
+        plt.plot(g_hist, color="g", label="Green")
+        plt.plot(r_hist, color="r", label="Red")
+
+        plt.title("RGB Histogramm")
+        plt.xlabel("Intensität (0–255)")
+        plt.ylabel("Pixelanzahl")
+        plt.xlim([0, 256])
+        plt.legend()
+
+        plt.tight_layout()
+        plt.show(block=False)
+        plt.pause(0.001)
 
         return r_hist, g_hist, b_hist
 
     def _222_HSV(self, img):
-        """
-            Hier steht Ihr Code zu Aufgabe 2.2.2 (HSV)
-            - Histogrammberechnung und Analyse im HSV-Raum
-        """
-        #von BGR in HSV
+
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
-        #HSV
-        h_hist = cv2.calcHist([hsv], [0], None, [180], [0, 180]) #Hue (Farbton) Kanal 0
+        h_hist = cv2.calcHist([hsv], [0], None, [180], [0, 180])
+        s_hist = cv2.calcHist([hsv], [1], None, [256], [0, 256])
+        v_hist = cv2.calcHist([hsv], [2], None, [256], [0, 256])
 
-        return h_hist
+        plt.figure("HSV Histogramm", figsize=(8, 4))
+        plt.clf()
+
+        plt.plot(h_hist, label="Hue (H)")
+        plt.plot(s_hist, label="Saturation (S)")
+        plt.plot(v_hist, label="Value (V)")
+
+        plt.title("HSV Histogramm")
+        plt.xlabel("Intensität")
+        plt.ylabel("Pixelanzahl")
+
+        plt.legend()
+        plt.tight_layout()
+
+        plt.show(block=False)
+        plt.pause(0.001)
+
+        return h_hist, s_hist, v_hist
 
     def _23_SegmentUndBildmodifizierung(self, img):
         """
