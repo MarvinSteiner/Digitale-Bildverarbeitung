@@ -67,24 +67,29 @@ class InvisCloak (Algorithm):
             Hier steht Ihr Code zu Aufgabe 2.1.1 (Rauschunterdrückung)
             - Implementierung Mittelwertbildung über N Frames
         """
+
+        N = 1  # Default laut Aufgabenstellung 2.1.1
+
         # Füge Bilder zum Image Stack hinzu, sodass maximal max_image_stack_length Bilder dort gespeichert sind
-        max_image_stack_length = 10
+        max_image_stack_length = N + 1
         self.image_stack.append(img)
         if len(self.image_stack) > max_image_stack_length:
             self.image_stack = self.image_stack[-max_image_stack_length:]
 
-        # Mittel über die letzten N Frames berechnen
-        if len(self.image_stack) > 1:
-            stack = np.stack(self.image_stack, axis=0)
+        # Mittelwert über alle Bilder im Stack berechnen
+        stack = np.stack(self.image_stack, axis=0)
 
-            # Überläufe durch 32-Bit Int vermeiden
-            sum_img = np.sum(stack.astype(np.uint32), axis=0)
+        # Überläufe durch 32-Bit Int vermeiden
+        sum_img = np.sum(stack.astype(np.uint32), axis=0)
 
-            N = min(len(self.image_stack), max_image_stack_length)
-            mean_int = sum_img // N
+        # Anzahl der aktuell gespeicherten Bilder
+        num_images = len(self.image_stack)
 
-            # Zurückkonvertieren von 32-Bit Int
-            img = mean_int.astype(self.image_stack[0].dtype)
+        # Mittelwert
+        mean_img = sum_img // num_images
+
+        # Zurück in 8-Bit konvertieren
+        img = mean_img.astype(np.uint8)
 
         return img
 
@@ -148,11 +153,11 @@ class InvisCloak (Algorithm):
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
         #Rot Range 1
-        lower_red1 = np.array([0, 120, 70])
+        lower_red1 = np.array([0, 50, 40])
         upper_red1 = np.array([10, 255, 255])
 
         #Rot Range 2
-        lower_red2 = np.array([170, 120, 70])
+        lower_red2 = np.array([170, 50, 40])
         upper_red2 = np.array([180, 255, 255])
 
         #Binärmaske erstellen
